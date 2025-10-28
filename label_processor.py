@@ -3,14 +3,8 @@ from roboflow import Roboflow
 import os
 from pathlib import Path
 import xml.etree.ElementTree as ET
-
-from PIL import Image
-import pytesseract
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 import re
-
 import subprocess
-import xml.etree.ElementTree as ET
 
 INKSCAPE_EXE = r"C:\Program Files\Inkscape\bin\inkscape.exe"
 
@@ -29,14 +23,17 @@ def clean_svg(svg_path):
     - Removes redundant strokes on filled paths
     """
     try:
-        # --- Flatten text to paths ---
+        # --- Flatten text to paths using Inkscape ---
+        # Use --export-filename instead of --export-plain-svg to avoid _out.svg
         print(f"→ Converting text to paths...")
         subprocess.run([
             INKSCAPE_EXE,
             svg_path,
-            "--export-plain-svg", svg_path,
-            "--actions=select-all;object-to-path;export-do"
-        ], check=True, capture_output=True)
+            "--export-type=svg",
+            "--export-plain-svg",
+            "--export-filename=" + svg_path,
+            "--actions=select-all;object-to-path"
+        ], check=True, capture_output=True, text=True)
 
         # --- Parse XML ---
         tree = ET.parse(svg_path)
@@ -86,33 +83,35 @@ def clean_svg(svg_path):
         print(f"⚠ SVG cleanup failed: {e}")
 
 
-def has_address_text(svg_path):
-    # Convert SVG to temporary PNG for OCR
-    temp_png = svg_path.replace(".svg", "_ocr.png")
-    os.system(f'magick "{svg_path}" "{temp_png}"')  # ImageMagick required
-    text = pytesseract.image_to_string(Image.open(temp_png))
-    os.remove(temp_png)
+def has_address_text(pdf_path, bbox):
+    """
+    Fast check if the cropped PDF region already contains address text
+    Uses PDF text layer (instant) - no OCR needed!
 
-    # --- OCR street pattern check ---
-    if re.search(
-        r"\d{1,5}\s+[A-Za-z]+\s+(St|Ave|Rd|Cir|Dr|Pl|Way|Ct|Ln|Blvd|Pkwy|Terr|Trail|Hwy|Place|Drive|Court|Road|Street|Lane)",
-        text, re.I):
-        return True
+    Args:
+        pdf_path: Path to original PDF
+        bbox: Bounding box dict with x_min, y_min, x_max, y_max
 
-    # --- Hidden text-layer fallback (vector PDFs) ---
+    Returns:
+        bool: True if address pattern found in the cropped region
+    """
     try:
-        pdf_path = svg_path.replace(".svg", ".pdf")
-        if os.path.exists(pdf_path):
-            import fitz  # PyMuPDF
-            doc = fitz.open(pdf_path)
-            text_layer = doc[0].get_text("text")
-            doc.close()
-            if re.search(
-                r"\d{1,5}\s+[A-Za-z]+\s+(St|Ave|Rd|Cir|Dr|Pl|Way|Ct|Ln|Blvd|Pkwy|Terr|Trail|Hwy|Place|Drive|Court|Road|Street|Lane)",
-                text_layer, re.I):
-                return True
-    except Exception:
-        pass
+        doc = fitz.open(pdf_path)
+        page = doc[0]
+
+        # Extract text only from the cropped region
+        crop_rect = fitz.Rect(bbox['x_min'], bbox['y_min'], bbox['x_max'], bbox['y_max'])
+        text = page.get_text("text", clip=crop_rect)
+        doc.close()
+
+        # Look for street address pattern
+        address_pattern = r"\d{1,5}\s+[A-Za-z]+\s+(St|Ave|Rd|Cir|Dr|Pl|Way|Ct|Ln|Blvd|Pkwy|Terr|Trail|Hwy|Place|Drive|Court|Road|Street|Lane)"
+
+        if re.search(address_pattern, text, re.IGNORECASE):
+            return True
+
+    except Exception as e:
+        print(f"⚠ Address check failed: {e}")
 
     return False
 
@@ -405,7 +404,7 @@ def add_address_to_svg(svg_path, address_text):
         text_elem.set('y', str(height + 15))  # Position below the main content
         text_elem.set('text-anchor', 'middle')  # Center alignment
         text_elem.set('font-family', 'Arial')
-        text_elem.set('font-size', '16')
+        text_elem.set('font-size', '9')  # 9pt to match existing labels
         text_elem.set('fill', 'black')
         text_elem.text = address_text
 
@@ -459,7 +458,7 @@ def process_single_pdf(pdf_path, model, job_code):
     # Add address if lookup is enabled
     if address_lookup:
         print("→ Checking for existing address text...")
-        if has_address_text(output_svg):
+        if has_address_text(pdf_path, pdf_bbox):
             print("✓ Address already present — skipping add.")
         else:
             print("→ Looking up address...")
@@ -471,8 +470,10 @@ def process_single_pdf(pdf_path, model, job_code):
             else:
                 print(f"⚠ No address found for {job_code}")
                 add_address_to_svg(output_svg, f"ADDRESS NOT FOUND: {job_code}")
-            
-            clean_svg(output_svg)
+
+        # Always clean the SVG (removes doubles, converts text to paths)
+        print("→ Cleaning SVG...")
+        clean_svg(output_svg)
     print(f"✓ SUCCESS: {output_svg}")
 
     os.remove(temp_image)
