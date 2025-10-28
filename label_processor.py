@@ -25,48 +25,62 @@ def clean_svg(svg_path):
     """
     Cleans and flattens an SVG:
     - Converts text to paths
-    - Removes invisible or duplicate paths recursively
-    - Normalizes stroke width
+    - Removes invisible or duplicate paths
+    - Removes redundant strokes on filled paths
     """
     try:
-        # --- Flatten text ---
+        # --- Flatten text to paths ---
+        print(f"→ Converting text to paths...")
         subprocess.run([
             INKSCAPE_EXE,
             svg_path,
             "--export-plain-svg", svg_path,
             "--actions=select-all;object-to-path;export-do"
-        ], check=True)
+        ], check=True, capture_output=True)
 
         # --- Parse XML ---
         tree = ET.parse(svg_path)
         root = tree.getroot()
         seen_d = set()
 
-        # Recursive cleanup
         def clean_node(node):
             for child in list(node):
                 tag = child.tag.lower()
-                # invisible?
-                if any(k in child.attrib for k in ["fill-opacity", "stroke-opacity"]) and \
-                   ("0" in child.attrib.get("fill-opacity", "") or "0" in child.attrib.get("stroke-opacity", "")):
-                    node.remove(child)
-                    continue
-                # duplicate paths
+                
+                # Remove FULLY invisible elements only
+                fill_opacity = child.attrib.get("fill-opacity", "1")
+                stroke_opacity = child.attrib.get("stroke-opacity", "1")
+                
+                try:
+                    # Only remove if BOTH are exactly 0
+                    if float(fill_opacity) == 0 and float(stroke_opacity) == 0:
+                        node.remove(child)
+                        continue
+                except:
+                    pass
+                
+                # Remove duplicate paths
                 if tag.endswith('path') and "d" in child.attrib:
                     d = child.attrib["d"]
                     if d in seen_d:
                         node.remove(child)
                         continue
                     seen_d.add(d)
-                # normalize stroke
-                if "stroke-width" in child.attrib:
-                    child.attrib["stroke-width"] = "1"
-                # recurse into groups
+                    
+                    # FIX THE DOUBLING: Remove stroke if element has fill
+                    # (PyMuPDF often adds BOTH which makes text look bold)
+                    fill = child.attrib.get("fill", "none")
+                    if fill != "none":
+                        # Has fill, remove stroke to prevent doubling
+                        child.attrib.pop("stroke", None)
+                        child.attrib.pop("stroke-width", None)
+                
+                # Recurse
                 clean_node(child)
 
         clean_node(root)
         tree.write(svg_path, encoding="utf-8", xml_declaration=True)
-        print(f"✓ Cleaned and flattened: {svg_path}")
+        print(f"✓ Cleaned: removed {len(seen_d)} duplicates")
 
     except Exception as e:
         print(f"⚠ SVG cleanup failed: {e}")
