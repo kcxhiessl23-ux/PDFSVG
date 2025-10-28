@@ -1,6 +1,8 @@
 # Google Sheets API credentials (NEVER commit this!)
 google_credentials.json
-*.json
+
+# Don't ignore all JSON files, just credentials
+# *.json
 
 # Python
 __pycache__/

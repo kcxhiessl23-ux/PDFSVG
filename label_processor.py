@@ -17,56 +17,109 @@ TEMP_FOLDER = r"C:\Users\kschi\OneDrive\Desktop\Placards\PDFSVGTEMP"
 CONFIDENCE_THRESHOLD = 40
 DPI_FOR_DETECTION = 96
 
-# Google Sheets address lookup (optional)
+# Address lookup (optional)
 ENABLE_ADDRESS_LOOKUP = True  # Set to False to disable address lookup
+ADDRESS_LOOKUP_METHOD = "CSV"  # "CSV" (simple) or "GOOGLE_SHEETS" (requires setup)
+
+# CSV method (RECOMMENDED - simple and free!)
+CSV_FILE = "job_codes.csv"  # Path to your CSV file
+
+# Google Sheets method (optional - requires Google Cloud setup)
 GOOGLE_SHEET_NAME = "Job Codes"  # Name of your Google Sheet
 GOOGLE_WORKSHEET = "Sheet1"  # Worksheet tab name
 GOOGLE_CREDENTIALS = "google_credentials.json"  # Path to credentials file
 
 # ========== SCRIPT ==========
 
-# Try to import Google Sheets libraries (optional)
+# Address lookup initialization
 address_lookup = None
-if ENABLE_ADDRESS_LOOKUP:
-    try:
-        import gspread
-        from google.oauth2.service_account import Credentials
 
-        class AddressLookup:
+if ENABLE_ADDRESS_LOOKUP:
+    if ADDRESS_LOOKUP_METHOD == "CSV":
+        # Simple CSV method (no external dependencies)
+        import csv
+
+        class CSVAddressLookup:
             def __init__(self):
-                self.sheet = None
                 self.address_cache = {}
+                self.connected = False
 
             def connect(self):
-                try:
-                    scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly']
-                    creds = Credentials.from_service_account_file(GOOGLE_CREDENTIALS, scopes=scopes)
-                    client = gspread.authorize(creds)
-                    self.sheet = client.open(GOOGLE_SHEET_NAME).worksheet(GOOGLE_WORKSHEET)
-                    self._load_cache()
-                    print(f"✓ Google Sheets connected: {len(self.address_cache)} addresses loaded")
-                    return True
-                except Exception as e:
-                    print(f"⚠ Address lookup disabled: {e}")
-                    print(f"  (See GOOGLE_SHEETS_SETUP.md for setup instructions)")
+                if not os.path.exists(CSV_FILE):
+                    print(f"⚠ CSV file not found: {CSV_FILE}")
+                    print(f"  Create '{CSV_FILE}' with columns: Job Code, Address")
                     return False
 
-            def _load_cache(self):
-                all_data = self.sheet.get_all_values()
-                for row in all_data[1:]:  # Skip header
-                    if len(row) >= 2:
-                        job_code = row[0].strip().upper()
-                        address = row[1].strip()
-                        if job_code and address:
-                            self.address_cache[job_code] = address
+                try:
+                    with open(CSV_FILE, 'r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
+
+                        if 'Job Code' not in reader.fieldnames or 'Address' not in reader.fieldnames:
+                            print(f"✗ CSV must have 'Job Code' and 'Address' columns")
+                            return False
+
+                        for row in reader:
+                            job_code = row['Job Code'].strip().upper()
+                            address = row['Address'].strip()
+                            if job_code and address:
+                                self.address_cache[job_code] = address
+
+                    self.connected = True
+                    print(f"✓ CSV loaded: {len(self.address_cache)} addresses found")
+                    return True
+
+                except Exception as e:
+                    print(f"✗ Failed to read CSV: {e}")
+                    return False
 
             def get_address(self, job_code):
+                if not self.connected:
+                    return None
                 return self.address_cache.get(job_code.strip().upper())
 
-        address_lookup = AddressLookup()
-    except ImportError:
-        print("⚠ Google Sheets libraries not installed. Run: pip install gspread google-auth")
-        print("  Address lookup disabled.")
+        address_lookup = CSVAddressLookup()
+
+    elif ADDRESS_LOOKUP_METHOD == "GOOGLE_SHEETS":
+        # Google Sheets method (requires setup)
+        try:
+            import gspread
+            from google.oauth2.service_account import Credentials
+
+            class GoogleSheetsAddressLookup:
+                def __init__(self):
+                    self.sheet = None
+                    self.address_cache = {}
+
+                def connect(self):
+                    try:
+                        scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+                        creds = Credentials.from_service_account_file(GOOGLE_CREDENTIALS, scopes=scopes)
+                        client = gspread.authorize(creds)
+                        self.sheet = client.open(GOOGLE_SHEET_NAME).worksheet(GOOGLE_WORKSHEET)
+                        self._load_cache()
+                        print(f"✓ Google Sheets connected: {len(self.address_cache)} addresses loaded")
+                        return True
+                    except Exception as e:
+                        print(f"⚠ Address lookup disabled: {e}")
+                        print(f"  (See GOOGLE_SHEETS_SETUP.md for setup instructions)")
+                        return False
+
+                def _load_cache(self):
+                    all_data = self.sheet.get_all_values()
+                    for row in all_data[1:]:  # Skip header
+                        if len(row) >= 2:
+                            job_code = row[0].strip().upper()
+                            address = row[1].strip()
+                            if job_code and address:
+                                self.address_cache[job_code] = address
+
+                def get_address(self, job_code):
+                    return self.address_cache.get(job_code.strip().upper())
+
+            address_lookup = GoogleSheetsAddressLookup()
+        except ImportError:
+            print("⚠ Google Sheets libraries not installed. Run: pip install gspread google-auth")
+            print("  Or use ADDRESS_LOOKUP_METHOD = 'CSV' instead")
 
 def setup_folders():
     Path(OUTPUT_FOLDER).mkdir(parents=True, exist_ok=True)

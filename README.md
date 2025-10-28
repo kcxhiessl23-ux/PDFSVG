@@ -17,14 +17,20 @@ This tool processes ~200 PDFs/month using Roboflow AI to automatically detect an
 
 ### Python Libraries
 
+**Required:**
 ```bash
-pip install pymupdf roboflow gspread google-auth
+pip install pymupdf roboflow
+```
+
+**Optional (only if using Google Sheets instead of CSV):**
+```bash
+pip install gspread google-auth
 ```
 
 ### Accounts & APIs
 
-- **Roboflow Account**: For object detection model
-- **Google Cloud Project**: For Sheets API (optional, see GOOGLE_SHEETS_SETUP.md)
+- **Roboflow Account**: For object detection model (required)
+- **Google Cloud Project**: Only needed if using Google Sheets (optional, see GOOGLE_SHEETS_SETUP.md)
 
 ## Quick Start
 
@@ -58,15 +64,29 @@ You should see:
 ✓ SUCCESS: All checks passed!
 ```
 
-### 3. Set Up Google Sheets (Optional)
+### 3. Set Up Address Lookup (Choose One)
+
+#### Option A: CSV File (Recommended - Simple & Free!)
+
+See **CSV_SETUP.md** for detailed instructions.
+
+Quick version:
+1. Edit `job_codes.csv` with your job codes and addresses
+2. Save it in the same folder as `label_processor.py`
+3. Done! (Already configured by default)
+
+#### Option B: Google Sheets (For Team Collaboration)
 
 See **GOOGLE_SHEETS_SETUP.md** for detailed instructions.
 
-Quick version:
-1. Create Google Sheet with job codes and addresses
-2. Enable Google Sheets API
-3. Create service account and download `google_credentials.json`
-4. Share sheet with service account email
+**Note**: Google Sheets API is FREE for your use case (no credit card needed), but CSV is simpler!
+
+To use Google Sheets:
+1. Follow GOOGLE_SHEETS_SETUP.md
+2. Change one line in `label_processor.py`:
+   ```python
+   ADDRESS_LOOKUP_METHOD = "GOOGLE_SHEETS"
+   ```
 
 ### 4. Run the Processor
 
@@ -93,9 +113,12 @@ Processing: C:\PDFs\002KALA.pdf
 ## Project Files
 
 - **label_processor.py** - Main batch processing script
-- **address_lookup.py** - Google Sheets integration module (standalone)
-- **test_roboflow.py** - Connection diagnostic tool
-- **GOOGLE_SHEETS_SETUP.md** - Step-by-step Google Sheets setup guide
+- **job_codes.csv** - Simple address lookup file (RECOMMENDED)
+- **csv_address_lookup.py** - CSV lookup module with testing
+- **address_lookup.py** - Google Sheets integration module (optional)
+- **test_roboflow.py** - Roboflow connection diagnostic tool
+- **CSV_SETUP.md** - Simple CSV setup guide (2 minutes)
+- **GOOGLE_SHEETS_SETUP.md** - Google Sheets setup guide (optional, 10 minutes)
 
 ## Configuration Options
 
@@ -118,8 +141,14 @@ DPI_FOR_DETECTION = 96
 ```python
 ENABLE_ADDRESS_LOOKUP = True
 ```
-- **True**: Look up addresses in Google Sheet
-- **False**: Skip address lookup (faster, no Google setup needed)
+- **True**: Look up addresses from CSV or Google Sheets
+- **False**: Skip address lookup entirely (fastest)
+
+```python
+ADDRESS_LOOKUP_METHOD = "CSV"  # or "GOOGLE_SHEETS"
+```
+- **"CSV"**: Use simple CSV file (recommended, default)
+- **"GOOGLE_SHEETS"**: Use Google Sheets (requires setup)
 
 ## Improving Detection Accuracy
 
