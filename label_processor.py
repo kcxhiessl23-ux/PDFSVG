@@ -472,8 +472,9 @@ def process_single_pdf(pdf_path, model, job_code):
                 add_address_to_svg(output_svg, f"ADDRESS NOT FOUND: {job_code}")
 
         # Always clean the SVG (removes doubles, converts text to paths)
-        print("→ Cleaning SVG...")
-        clean_svg(output_svg)
+        # DISABLED - Was removing too much content!
+        # print("→ Cleaning SVG...")
+        # clean_svg(output_svg)
     print(f"✓ SUCCESS: {output_svg}")
 
     os.remove(temp_image)
