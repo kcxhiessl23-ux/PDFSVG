@@ -66,26 +66,39 @@ You should see:
 
 ### 3. Set Up Address Lookup (Choose One)
 
-#### Option A: CSV File (Recommended - Simple & Free!)
+#### Option A: Google Sheets (Recommended - Easy Weekly Updates!)
+
+See **GOOGLE_SHEETS_SETUP_SIMPLE.md** for step-by-step setup (10 minutes).
+
+**Why Google Sheets?**
+- ✅ 100% FREE (no credit card, no charges)
+- ✅ Edit from anywhere (phone, tablet, computer)
+- ✅ Perfect for weekly updates
+- ✅ No comma/formatting issues
+- ✅ Version history included
+
+Quick version:
+1. Create a Google Sheet with your job codes and addresses
+2. Follow GOOGLE_SHEETS_SETUP_SIMPLE.md (10 min setup)
+3. Download `google_credentials.json`
+4. Share sheet with service account email
+5. Test with: `python test_google_sheets.py`
+6. Done! (Already configured by default)
+
+#### Option B: CSV File (For Simple Local Use)
 
 See **CSV_SETUP.md** for detailed instructions.
 
-Quick version:
-1. Edit `job_codes.csv` with your job codes and addresses
-2. Save it in the same folder as `label_processor.py`
-3. Done! (Already configured by default)
+Good if you:
+- Don't need weekly updates
+- Want everything offline
+- Prefer editing in Excel/Notepad
 
-#### Option B: Google Sheets (For Team Collaboration)
-
-See **GOOGLE_SHEETS_SETUP.md** for detailed instructions.
-
-**Note**: Google Sheets API is FREE for your use case (no credit card needed), but CSV is simpler!
-
-To use Google Sheets:
-1. Follow GOOGLE_SHEETS_SETUP.md
-2. Change one line in `label_processor.py`:
+To use CSV:
+1. Edit `job_codes.csv`
+2. Change in `label_processor.py`:
    ```python
-   ADDRESS_LOOKUP_METHOD = "GOOGLE_SHEETS"
+   ADDRESS_LOOKUP_METHOD = "CSV"
    ```
 
 ### 4. Run the Processor
@@ -113,12 +126,13 @@ Processing: C:\PDFs\002KALA.pdf
 ## Project Files
 
 - **label_processor.py** - Main batch processing script
-- **job_codes.csv** - Simple address lookup file (RECOMMENDED)
+- **test_roboflow.py** - Test Roboflow connection
+- **test_google_sheets.py** - Test Google Sheets connection (with helpful error messages!)
+- **GOOGLE_SHEETS_SETUP_SIMPLE.md** - Simplified Google Sheets setup (10 min, RECOMMENDED)
+- **job_codes.csv** - Example CSV file for local address lookup
 - **csv_address_lookup.py** - CSV lookup module with testing
-- **address_lookup.py** - Google Sheets integration module (optional)
-- **test_roboflow.py** - Roboflow connection diagnostic tool
-- **CSV_SETUP.md** - Simple CSV setup guide (2 minutes)
-- **GOOGLE_SHEETS_SETUP.md** - Google Sheets setup guide (optional, 10 minutes)
+- **CSV_SETUP.md** - CSV setup guide (2 minutes, for offline use)
+- **GOOGLE_SHEETS_SETUP.md** - Original detailed Google Sheets guide (more technical)
 
 ## Configuration Options
 

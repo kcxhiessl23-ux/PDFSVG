@@ -19,15 +19,16 @@ DPI_FOR_DETECTION = 96
 
 # Address lookup (optional)
 ENABLE_ADDRESS_LOOKUP = True  # Set to False to disable address lookup
-ADDRESS_LOOKUP_METHOD = "CSV"  # "CSV" (simple) or "GOOGLE_SHEETS" (requires setup)
+ADDRESS_LOOKUP_METHOD = "GOOGLE_SHEETS"  # "GOOGLE_SHEETS" or "CSV"
 
-# CSV method (RECOMMENDED - simple and free!)
-CSV_FILE = "job_codes.csv"  # Path to your CSV file
-
-# Google Sheets method (optional - requires Google Cloud setup)
+# Google Sheets method (RECOMMENDED for weekly updates!)
+# See GOOGLE_SHEETS_SETUP_SIMPLE.md for setup (10 min, 100% FREE)
 GOOGLE_SHEET_NAME = "Job Codes"  # Name of your Google Sheet
-GOOGLE_WORKSHEET = "Sheet1"  # Worksheet tab name
+GOOGLE_WORKSHEET = "Sheet1"  # Worksheet tab name (check bottom of your sheet)
 GOOGLE_CREDENTIALS = "google_credentials.json"  # Path to credentials file
+
+# CSV method (alternative - simple local file)
+CSV_FILE = "job_codes.csv"  # Path to your CSV file
 
 # ========== SCRIPT ==========
 
