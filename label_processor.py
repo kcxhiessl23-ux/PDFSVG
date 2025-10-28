@@ -23,10 +23,62 @@ def setup_folders():
     Path(TEMP_FOLDER).mkdir(parents=True, exist_ok=True)
 
 def initialize_roboflow():
+    print("loading Roboflow workspace...")
     rf = Roboflow(api_key=ROBOFLOW_API_KEY)
-    project = rf.workspace(WORKSPACE).project(PROJECT)
-    model = project.version(VERSION).model
-    return model
+
+    # Try method 1: Using workspace name
+    try:
+        workspace = rf.workspace(WORKSPACE)
+        print(f"✓ Workspace loaded: {WORKSPACE}")
+    except Exception as e:
+        print(f"⚠ Failed with workspace name '{WORKSPACE}': {e}")
+        # Try method 2: Use default workspace (no parameter)
+        print("→ Trying default workspace...")
+        try:
+            workspace = rf.workspace()
+            print(f"✓ Using default workspace")
+        except Exception as e2:
+            print(f"✗ Failed to load workspace: {e2}")
+            print("\nTroubleshooting:")
+            print("  1. Check workspace name in Roboflow dashboard")
+            print("  2. Verify API key has access to the workspace")
+            raise
+
+    try:
+        print("loading Roboflow project...")
+        project = workspace.project(PROJECT)
+        print(f"✓ Project loaded: {PROJECT}")
+    except Exception as e:
+        print(f"✗ Failed to load project '{PROJECT}': {e}")
+        print("\nTroubleshooting:")
+        print("  1. Verify project name in Roboflow dashboard")
+        print("  2. Check project exists in your workspace")
+        raise
+
+    try:
+        version = project.version(VERSION)
+        if version is None:
+            raise ValueError(f"Version {VERSION} returned None")
+        print(f"✓ Version loaded: {VERSION}")
+    except Exception as e:
+        print(f"✗ Failed to load version {VERSION}: {e}")
+        print("\nTroubleshooting:")
+        print(f"  1. Check if version {VERSION} exists")
+        print("  2. Ensure the version is deployed")
+        raise
+
+    try:
+        model = version.model
+        if model is None:
+            raise ValueError("Model object is None - check your Roboflow project has a trained model")
+        print(f"✓ Model object created")
+        return model
+    except Exception as e:
+        print(f"✗ Failed to get model: {e}")
+        print("\nTroubleshooting:")
+        print("  1. Ensure model is trained and deployed")
+        print("  2. Check version has an active model")
+        raise
 
 def pdf_to_preview_image(pdf_path, output_path, dpi=96):
     pdf = fitz.open(pdf_path)
@@ -133,12 +185,18 @@ def process_single_pdf(pdf_path, model, job_code):
 
 def process_batch():
     setup_folders()
-    
+
     print("\n" + "="*60)
     print("INITIALIZING ROBOFLOW")
     print("="*60)
-    model = initialize_roboflow()
-    print("✓ Model loaded\n")
+
+    try:
+        model = initialize_roboflow()
+        print("="*60)
+        print("✓ Roboflow ready\n")
+    except Exception as e:
+        print(f"\n✗ FATAL: Failed to initialize Roboflow: {e}")
+        return
     
     pdf_files = list(Path(INPUT_FOLDER).glob("*.pdf"))
     
