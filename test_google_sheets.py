@@ -66,7 +66,11 @@ except ImportError:
 # Step 4: Try to authenticate
 print("\n[Step 4/5] Testing authentication...")
 try:
-    scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+    # Use full spreadsheets scope (not just readonly) and Drive scope as fallback
+    scopes = [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive'
+    ]
     creds = Credentials.from_service_account_file(GOOGLE_CREDENTIALS, scopes=scopes)
     client = gspread.authorize(creds)
     print("✓ Authentication successful")

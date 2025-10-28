@@ -28,9 +28,10 @@ class AddressLookup:
     def connect(self):
         """Connect to Google Sheets and load the address data"""
         try:
-            # Define the scope
+            # Define the scopes (use full access to avoid permission errors)
             scopes = [
-                'https://www.googleapis.com/auth/spreadsheets.readonly'
+                'https://www.googleapis.com/auth/spreadsheets',
+                'https://www.googleapis.com/auth/drive'
             ]
 
             # Authenticate
