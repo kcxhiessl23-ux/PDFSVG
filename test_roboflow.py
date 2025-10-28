@@ -7,7 +7,7 @@ from roboflow import Roboflow
 ROBOFLOW_API_KEY = "L93UjMpMcsqujZ2mRU6N"
 WORKSPACE = "placardcleanup"
 PROJECT = "placard_cleanup-imhpc"
-VERSION = 1
+VERSION = 2  # Version 2 is trained and deployed
 
 print("="*60)
 print("TESTING ROBOFLOW CONNECTION")

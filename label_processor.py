@@ -2,12 +2,13 @@ import fitz  # PyMuPDF
 from roboflow import Roboflow
 import os
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 # ========== CONFIG ==========
 ROBOFLOW_API_KEY = "L93UjMpMcsqujZ2mRU6N"
 WORKSPACE = "placardcleanup"
 PROJECT = "placard_cleanup-imhpc"  # ← Find this in Roboflow (it's the model name)
-VERSION = 1
+VERSION = 2  # Version 2 is trained and deployed
 
 INPUT_FOLDER = r"C:\Users\kschi\OneDrive\Desktop\Placards\PDFs"  # ← Your PDF folder
 OUTPUT_FOLDER = r"C:\Users\kschi\OneDrive\Desktop\Placards\SVGs"
@@ -16,7 +17,56 @@ TEMP_FOLDER = r"C:\Users\kschi\OneDrive\Desktop\Placards\PDFSVGTEMP"
 CONFIDENCE_THRESHOLD = 40
 DPI_FOR_DETECTION = 96
 
+# Google Sheets address lookup (optional)
+ENABLE_ADDRESS_LOOKUP = True  # Set to False to disable address lookup
+GOOGLE_SHEET_NAME = "Job Codes"  # Name of your Google Sheet
+GOOGLE_WORKSHEET = "Sheet1"  # Worksheet tab name
+GOOGLE_CREDENTIALS = "google_credentials.json"  # Path to credentials file
+
 # ========== SCRIPT ==========
+
+# Try to import Google Sheets libraries (optional)
+address_lookup = None
+if ENABLE_ADDRESS_LOOKUP:
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+
+        class AddressLookup:
+            def __init__(self):
+                self.sheet = None
+                self.address_cache = {}
+
+            def connect(self):
+                try:
+                    scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+                    creds = Credentials.from_service_account_file(GOOGLE_CREDENTIALS, scopes=scopes)
+                    client = gspread.authorize(creds)
+                    self.sheet = client.open(GOOGLE_SHEET_NAME).worksheet(GOOGLE_WORKSHEET)
+                    self._load_cache()
+                    print(f"✓ Google Sheets connected: {len(self.address_cache)} addresses loaded")
+                    return True
+                except Exception as e:
+                    print(f"⚠ Address lookup disabled: {e}")
+                    print(f"  (See GOOGLE_SHEETS_SETUP.md for setup instructions)")
+                    return False
+
+            def _load_cache(self):
+                all_data = self.sheet.get_all_values()
+                for row in all_data[1:]:  # Skip header
+                    if len(row) >= 2:
+                        job_code = row[0].strip().upper()
+                        address = row[1].strip()
+                        if job_code and address:
+                            self.address_cache[job_code] = address
+
+            def get_address(self, job_code):
+                return self.address_cache.get(job_code.strip().upper())
+
+        address_lookup = AddressLookup()
+    except ImportError:
+        print("⚠ Google Sheets libraries not installed. Run: pip install gspread google-auth")
+        print("  Address lookup disabled.")
 
 def setup_folders():
     Path(OUTPUT_FOLDER).mkdir(parents=True, exist_ok=True)
@@ -136,22 +186,80 @@ def convert_image_coords_to_pdf(bbox, page_width, page_height, img_width, img_he
 def crop_pdf_to_svg(pdf_path, bbox, output_path):
     pdf = fitz.open(pdf_path)
     page = pdf[0]
-    
+
     crop_rect = fitz.Rect(
         bbox['x_min'],
         bbox['y_min'],
         bbox['x_max'],
         bbox['y_max']
     )
-    
+
     page.set_cropbox(crop_rect)
     svg_content = page.get_svg_image()
-    
+
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(svg_content)
-    
+
     pdf.close()
     return True
+
+def add_address_to_svg(svg_path, address_text):
+    """
+    Add address text to the bottom of an SVG file
+
+    Args:
+        svg_path: Path to the SVG file
+        address_text: Address text to add
+    """
+    try:
+        # Parse the SVG
+        tree = ET.parse(svg_path)
+        root = tree.getroot()
+
+        # Get SVG namespace
+        namespace = {'svg': 'http://www.w3.org/2000/svg'}
+
+        # Get SVG dimensions
+        width = float(root.get('width', '0').replace('pt', ''))
+        height = float(root.get('height', '0').replace('pt', ''))
+
+        if width == 0 or height == 0:
+            # Try viewBox if width/height not found
+            viewbox = root.get('viewBox', '0 0 0 0').split()
+            width = float(viewbox[2])
+            height = float(viewbox[3])
+
+        # Create text element
+        text_elem = ET.Element('{http://www.w3.org/2000/svg}text')
+        text_elem.set('x', str(width / 2))  # Center horizontally
+        text_elem.set('y', str(height + 15))  # Position below the main content
+        text_elem.set('text-anchor', 'middle')  # Center alignment
+        text_elem.set('font-family', 'Arial, sans-serif')
+        text_elem.set('font-size', '12')
+        text_elem.set('fill', 'black')
+        text_elem.text = address_text
+
+        # Extend viewBox to include the address
+        if root.get('viewBox'):
+            viewbox = root.get('viewBox').split()
+            new_height = float(viewbox[3]) + 25  # Add space for text
+            root.set('viewBox', f"{viewbox[0]} {viewbox[1]} {viewbox[2]} {new_height}")
+
+        # Update height attribute
+        if root.get('height'):
+            new_height = height + 25
+            root.set('height', f"{new_height}pt")
+
+        # Add text to SVG
+        root.append(text_elem)
+
+        # Save modified SVG
+        tree.write(svg_path, encoding='utf-8', xml_declaration=True)
+        return True
+
+    except Exception as e:
+        print(f"⚠ Warning: Could not add address to SVG: {e}")
+        return False
 
 def process_single_pdf(pdf_path, model, job_code):
     print(f"\n{'='*60}")
@@ -177,9 +285,23 @@ def process_single_pdf(pdf_path, model, job_code):
     output_svg = os.path.join(OUTPUT_FOLDER, f"{job_code}.svg")
     print("→ Extracting vector region...")
     crop_pdf_to_svg(pdf_path, pdf_bbox, output_svg)
-    
+
+    # Add address if lookup is enabled
+    if address_lookup:
+        print("→ Looking up address...")
+        address = address_lookup.get_address(job_code)
+
+        if address:
+            print(f"✓ Address found: {address}")
+            print("→ Adding address to SVG...")
+            add_address_to_svg(output_svg, address)
+        else:
+            print(f"⚠ No address found for {job_code}")
+            # Add a placeholder message
+            add_address_to_svg(output_svg, f"ADDRESS NOT FOUND: {job_code}")
+
     print(f"✓ SUCCESS: {output_svg}")
-    
+
     os.remove(temp_image)
     return True
 
@@ -197,7 +319,17 @@ def process_batch():
     except Exception as e:
         print(f"\n✗ FATAL: Failed to initialize Roboflow: {e}")
         return
-    
+
+    # Initialize address lookup if enabled
+    if address_lookup:
+        print("="*60)
+        print("INITIALIZING ADDRESS LOOKUP")
+        print("="*60)
+        if not address_lookup.connect():
+            print("⚠ Continuing without address lookup\n")
+        else:
+            print()
+
     pdf_files = list(Path(INPUT_FOLDER).glob("*.pdf"))
     
     if not pdf_files:
