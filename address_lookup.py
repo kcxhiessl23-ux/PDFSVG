@@ -13,7 +13,7 @@ ADDRESS_COLUMN = "B"  # ← Column containing addresses
 
 # Google Sheets API credentials file path
 # Option 1: Just filename (file must be in same folder as this script)
-CREDENTIALS_FILE = "google_credentials.json"
+CREDENTIALS_FILE = r"C:\Users\kschi\OneDrive\Desktop\Placards\Pys\google_credentials.json"
 
 # Option 2: Full path (use raw string with r"..." or forward slashes)
 # CREDENTIALS_FILE = r"C:\Users\YourName\Path\To\google_credentials.json"
