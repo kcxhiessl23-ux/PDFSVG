@@ -4,11 +4,103 @@ import os
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-# ========== CONFIG ==========
+from PIL import Image
+import pytesseract
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+import re
+
+import subprocess
+import xml.etree.ElementTree as ET
+
+INKSCAPE_EXE = r"C:\Program Files\Inkscape\bin\inkscape.exe"
+
+
 ROBOFLOW_API_KEY = "L93UjMpMcsqujZ2mRU6N"
 WORKSPACE = "placardcleanup"
-PROJECT = "placard_cleanup-imhpc"  # ← Find this in Roboflow (it's the model name)
-VERSION = 2  # Version 2 is trained and deployed
+PROJECT = "placard_cleanup-imhpc"  # model name in Roboflow
+VERSION = 4  # active version
+
+
+def clean_svg(svg_path):
+    """
+    Cleans and flattens an SVG:
+    - Converts text to paths
+    - Removes invisible or duplicate paths recursively
+    - Normalizes stroke width
+    """
+    try:
+        # --- Flatten text ---
+        subprocess.run([
+            INKSCAPE_EXE,
+            svg_path,
+            "--export-plain-svg", svg_path,
+            "--actions=select-all;object-to-path;export-do"
+        ], check=True)
+
+        # --- Parse XML ---
+        tree = ET.parse(svg_path)
+        root = tree.getroot()
+        seen_d = set()
+
+        # Recursive cleanup
+        def clean_node(node):
+            for child in list(node):
+                tag = child.tag.lower()
+                # invisible?
+                if any(k in child.attrib for k in ["fill-opacity", "stroke-opacity"]) and \
+                   ("0" in child.attrib.get("fill-opacity", "") or "0" in child.attrib.get("stroke-opacity", "")):
+                    node.remove(child)
+                    continue
+                # duplicate paths
+                if tag.endswith('path') and "d" in child.attrib:
+                    d = child.attrib["d"]
+                    if d in seen_d:
+                        node.remove(child)
+                        continue
+                    seen_d.add(d)
+                # normalize stroke
+                if "stroke-width" in child.attrib:
+                    child.attrib["stroke-width"] = "1"
+                # recurse into groups
+                clean_node(child)
+
+        clean_node(root)
+        tree.write(svg_path, encoding="utf-8", xml_declaration=True)
+        print(f"✓ Cleaned and flattened: {svg_path}")
+
+    except Exception as e:
+        print(f"⚠ SVG cleanup failed: {e}")
+
+
+def has_address_text(svg_path):
+    # Convert SVG to temporary PNG for OCR
+    temp_png = svg_path.replace(".svg", "_ocr.png")
+    os.system(f'magick "{svg_path}" "{temp_png}"')  # ImageMagick required
+    text = pytesseract.image_to_string(Image.open(temp_png))
+    os.remove(temp_png)
+
+    # --- OCR street pattern check ---
+    if re.search(
+        r"\d{1,5}\s+[A-Za-z]+\s+(St|Ave|Rd|Cir|Dr|Pl|Way|Ct|Ln|Blvd|Pkwy|Terr|Trail|Hwy|Place|Drive|Court|Road|Street|Lane)",
+        text, re.I):
+        return True
+
+    # --- Hidden text-layer fallback (vector PDFs) ---
+    try:
+        pdf_path = svg_path.replace(".svg", ".pdf")
+        if os.path.exists(pdf_path):
+            import fitz  # PyMuPDF
+            doc = fitz.open(pdf_path)
+            text_layer = doc[0].get_text("text")
+            doc.close()
+            if re.search(
+                r"\d{1,5}\s+[A-Za-z]+\s+(St|Ave|Rd|Cir|Dr|Pl|Way|Ct|Ln|Blvd|Pkwy|Terr|Trail|Hwy|Place|Drive|Court|Road|Street|Lane)",
+                text_layer, re.I):
+                return True
+    except Exception:
+        pass
+
+    return False
 
 # ⚠ WINDOWS USERS: Use r"..." (raw strings) for paths with backslashes!
 # Good: r"C:\Users\Name\Desktop\Folder"  or  "C:/Users/Name/Desktop/Folder"
@@ -31,8 +123,7 @@ GOOGLE_SHEET_NAME = "Job Codes"  # Name of your Google Sheet
 GOOGLE_WORKSHEET = "Sheet1"  # Worksheet tab name (check bottom of your sheet)
 
 # Credentials file - just filename if in same folder, or full path with r"..."
-GOOGLE_CREDENTIALS = "google_credentials.json"  # Same folder as this script
-# GOOGLE_CREDENTIALS = r"C:\Users\YourName\Path\To\google_credentials.json"  # Or full path
+GOOGLE_CREDENTIALS = r"C:\Users\kschi\OneDrive\Desktop\Placards\Pys\google_credentials.json"  # Same folder as this scrip
 
 # CSV method (alternative - simple local file)
 CSV_FILE = "job_codes.csv"  # Path to your CSV file
@@ -299,8 +390,8 @@ def add_address_to_svg(svg_path, address_text):
         text_elem.set('x', str(width / 2))  # Center horizontally
         text_elem.set('y', str(height + 15))  # Position below the main content
         text_elem.set('text-anchor', 'middle')  # Center alignment
-        text_elem.set('font-family', 'Arial, sans-serif')
-        text_elem.set('font-size', '12')
+        text_elem.set('font-family', 'Arial')
+        text_elem.set('font-size', '16')
         text_elem.set('fill', 'black')
         text_elem.text = address_text
 
@@ -353,18 +444,21 @@ def process_single_pdf(pdf_path, model, job_code):
 
     # Add address if lookup is enabled
     if address_lookup:
-        print("→ Looking up address...")
-        address = address_lookup.get_address(job_code)
-
-        if address:
-            print(f"✓ Address found: {address}")
-            print("→ Adding address to SVG...")
-            add_address_to_svg(output_svg, address)
+        print("→ Checking for existing address text...")
+        if has_address_text(output_svg):
+            print("✓ Address already present — skipping add.")
         else:
-            print(f"⚠ No address found for {job_code}")
-            # Add a placeholder message
-            add_address_to_svg(output_svg, f"ADDRESS NOT FOUND: {job_code}")
-
+            print("→ Looking up address...")
+            address = address_lookup.get_address(job_code)
+            if address:
+                print(f"✓ Address found: {address}")
+                print("→ Adding address to SVG...")
+                add_address_to_svg(output_svg, address)
+            else:
+                print(f"⚠ No address found for {job_code}")
+                add_address_to_svg(output_svg, f"ADDRESS NOT FOUND: {job_code}")
+            
+            clean_svg(output_svg)
     print(f"✓ SUCCESS: {output_svg}")
 
     os.remove(temp_image)
