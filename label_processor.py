@@ -10,6 +10,10 @@ WORKSPACE = "placardcleanup"
 PROJECT = "placard_cleanup-imhpc"  # ← Find this in Roboflow (it's the model name)
 VERSION = 2  # Version 2 is trained and deployed
 
+# ⚠ WINDOWS USERS: Use r"..." (raw strings) for paths with backslashes!
+# Good: r"C:\Users\Name\Desktop\Folder"  or  "C:/Users/Name/Desktop/Folder"
+# Bad:  "C:\Users\Name\Desktop\Folder"  ← Will cause syntax errors!
+
 INPUT_FOLDER = r"C:\Users\kschi\OneDrive\Desktop\Placards\PDFs"  # ← Your PDF folder
 OUTPUT_FOLDER = r"C:\Users\kschi\OneDrive\Desktop\Placards\SVGs"
 TEMP_FOLDER = r"C:\Users\kschi\OneDrive\Desktop\Placards\PDFSVGTEMP"
@@ -25,7 +29,10 @@ ADDRESS_LOOKUP_METHOD = "GOOGLE_SHEETS"  # "GOOGLE_SHEETS" or "CSV"
 # See GOOGLE_SHEETS_SETUP_SIMPLE.md for setup (10 min, 100% FREE)
 GOOGLE_SHEET_NAME = "Job Codes"  # Name of your Google Sheet
 GOOGLE_WORKSHEET = "Sheet1"  # Worksheet tab name (check bottom of your sheet)
-GOOGLE_CREDENTIALS = "google_credentials.json"  # Path to credentials file
+
+# Credentials file - just filename if in same folder, or full path with r"..."
+GOOGLE_CREDENTIALS = "google_credentials.json"  # Same folder as this script
+# GOOGLE_CREDENTIALS = r"C:\Users\YourName\Path\To\google_credentials.json"  # Or full path
 
 # CSV method (alternative - simple local file)
 CSV_FILE = "job_codes.csv"  # Path to your CSV file
