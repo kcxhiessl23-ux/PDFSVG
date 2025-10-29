@@ -69,11 +69,10 @@ def estimate_path_area(d):
 
 def extract_clean_svg(pdf_path, bbox, output_path):
     """
-    NEW METHOD: Filter out large rectangles (backgrounds/boxes)
-    Keep text, diagrams, and actual placard content
-    RECURSIVELY processes groups to catch nested large rectangles
+    NEW APPROACH: Keep defs intact, filter paths by COORDINATES not area
+    Remove paths that are outside the SVG viewBox bounds
     """
-    print("  → Clean extraction (removing backgrounds/boxes)")
+    print("  → Clean extraction (removing out-of-bounds paths)")
 
     pdf = fitz.open(pdf_path)
     page = pdf[0]
@@ -88,65 +87,65 @@ def extract_clean_svg(pdf_path, bbox, output_path):
 
     svg_width = float(root.get('width', '0').replace('pt', ''))
     svg_height = float(root.get('height', '0').replace('pt', ''))
-    placard_area = svg_width * svg_height
 
-    print(f"  → Placard size: {svg_width:.0f}x{svg_height:.0f}pt (area: {placard_area:.0f})")
+    print(f"  → Placard size: {svg_width:.0f}x{svg_height:.0f}pt")
 
-    # Get original viewBox to check for offsets
+    # Get viewBox - this is our "in bounds" area
     original_viewBox = root.get('viewBox', f"0 0 {svg_width} {svg_height}")
     vb_parts = original_viewBox.split()
     vb_x = float(vb_parts[0]) if len(vb_parts) > 0 else 0
     vb_y = float(vb_parts[1]) if len(vb_parts) > 1 else 0
+    vb_w = float(vb_parts[2]) if len(vb_parts) > 2 else svg_width
+    vb_h = float(vb_parts[3]) if len(vb_parts) > 3 else svg_height
 
-    # Add small margin to prevent text cutoff (2pt on each side)
+    # Add margin to viewBox to prevent cutoff
     margin = 2
     viewBox_x = vb_x - margin
     viewBox_y = vb_y - margin
-    viewBox_w = svg_width + (margin * 2)
-    viewBox_h = svg_height + (margin * 2)
+    viewBox_w = vb_w + (margin * 2)
+    viewBox_h = vb_h + (margin * 2)
 
-    print(f"  → ViewBox: {viewBox_x} {viewBox_y} {viewBox_w} {viewBox_h} (with {margin}pt margin)")
+    print(f"  → ViewBox bounds: x={vb_x}, y={vb_y}, w={vb_w}, h={vb_h}")
 
-    # Stats
-    stats = {'kept': 0, 'skipped_large': 0, 'skipped_meta': 0}
+    stats = {'kept': 0, 'skipped': 0, 'skipped_meta': 0}
 
-    # Helper function to check if element should be filtered
-    def should_keep_element(elem):
-        """Returns True if element should be kept, False if filtered out"""
-        tag = elem.tag.lower()
+    def is_path_in_bounds(d):
+        """Check if path coordinates are within viewBox"""
+        if not d:
+            return True  # Keep empty paths
 
-        # Always filter metadata
-        if tag.endswith(('metadata', 'title', 'desc')):
-            stats['skipped_meta'] += 1
-            return False
+        nums = re.findall(r'-?\d+\.?\d*', d)
+        if len(nums) < 2:
+            return True
 
-        # Filter large paths
-        if tag.endswith('path'):
-            d = elem.get('d', '')
-            area = estimate_path_area(d)
-            if area > placard_area * 0.5:
-                stats['skipped_large'] += 1
-                print(f"    ✗ Filtered path with area {area:.0f} (threshold: {placard_area * 0.5:.0f})")
-                return False
+        try:
+            coords = [float(n) for n in nums]
+            xs = coords[::2]
+            ys = coords[1::2]
 
-        # Filter large rects
-        if tag.endswith('rect'):
-            try:
-                w = float(elem.get('width', '0'))
-                h = float(elem.get('height', '0'))
-                area = w * h
-                if area > placard_area * 0.5:
-                    stats['skipped_large'] += 1
-                    print(f"    ✗ Filtered rect with area {area:.0f}")
-                    return False
-            except:
-                pass
+            if not xs or not ys:
+                return True
 
-        return True
+            # Get path bounding box
+            min_x, max_x = min(xs), max(xs)
+            min_y, max_y = min(ys), max(ys)
 
-    # Recursive function to process groups and filter large elements
+            # Allow 50% margin - if path center is way outside bounds, skip it
+            # This catches page-size elements that extend far beyond the placard
+            path_center_x = (min_x + max_x) / 2
+            path_center_y = (min_y + max_y) / 2
+
+            margin_factor = 1.5  # 50% outside is OK
+
+            x_in_bounds = (vb_x - vb_w * margin_factor) < path_center_x < (vb_x + vb_w * (1 + margin_factor))
+            y_in_bounds = (vb_y - vb_h * margin_factor) < path_center_y < (vb_y + vb_h * (1 + margin_factor))
+
+            return x_in_bounds and y_in_bounds
+        except:
+            return True  # Keep on error
+
     def process_group(parent_elem):
-        """Recursively process group, filtering out large rectangles"""
+        """Recursively process group, filtering out-of-bounds paths"""
         new_group = ET.Element(parent_elem.tag, parent_elem.attrib)
 
         if parent_elem.text:
@@ -160,26 +159,25 @@ def extract_clean_svg(pdf_path, bbox, output_path):
             # Recursively process groups
             if tag.endswith('g'):
                 filtered_group = process_group(child)
-                # Only add group if it has children
                 if len(filtered_group) > 0 or filtered_group.text:
                     new_group.append(filtered_group)
-                    stats['kept'] += 1
                 continue
 
-            # Check if we should keep this element
-            if should_keep_element(child):
-                new_group.append(child)
-                stats['kept'] += 1
+            # Filter paths by coordinates
+            if tag.endswith('path'):
+                d = child.get('d', '')
+                if is_path_in_bounds(d):
+                    new_group.append(child)
+                    stats['kept'] += 1
+                else:
+                    stats['skipped'] += 1
+                continue
+
+            # Keep everything else (text, use, etc.)
+            new_group.append(child)
+            stats['kept'] += 1
 
         return new_group
-
-    # First pass: find used defs (fonts)
-    defs_to_keep = set()
-    for elem in root.iter():
-        if elem.tag.endswith('use'):
-            href = elem.get('{http://www.w3.org/1999/xlink}href', elem.get('href', ''))
-            if href.startswith('#'):
-                defs_to_keep.add(href[1:])
 
     # Create clean SVG
     NS = "http://www.w3.org/2000/svg"
@@ -192,34 +190,13 @@ def extract_clean_svg(pdf_path, bbox, output_path):
     clean_root.set('height', f"{svg_height}pt")
     clean_root.set('viewBox', f"{viewBox_x} {viewBox_y} {viewBox_w} {viewBox_h}")
 
-    # Second pass: copy elements, filtering out large shapes
+    # Copy elements
     for elem in root:
         tag = elem.tag.lower()
 
-        # Keep defs (fonts/patterns) - Filter clipPath contents
+        # Keep ALL defs completely untouched (fonts, clipPaths, everything!)
         if tag.endswith('defs'):
-            new_defs = ET.Element(elem.tag, elem.attrib)
-            for def_elem in elem:
-                def_id = def_elem.get('id', '')
-
-                # Filter clipPath contents by area (RECURSIVELY)
-                if def_elem.tag.endswith('clipPath'):
-                    # Use the recursive process_group function to filter clipPath contents
-                    filtered_clip = process_group(def_elem)
-
-                    # Only keep clipPath if it still has content after filtering
-                    if len(filtered_clip) > 0:
-                        # Change tag back to clipPath (process_group preserves tag)
-                        new_defs.append(filtered_clip)
-                    else:
-                        print(f"    ✗ Removed empty clipPath '{def_elem.get('id')}'")
-                    continue
-
-                # Keep fonts if used
-                if def_id in defs_to_keep:
-                    new_defs.append(def_elem)
-
-            clean_root.append(new_defs)
+            clean_root.append(elem)
             stats['kept'] += 1
             continue
 
@@ -231,17 +208,16 @@ def extract_clean_svg(pdf_path, bbox, output_path):
         # Process groups recursively
         if tag.endswith('g'):
             filtered_group = process_group(elem)
-            if len(filtered_group) > 0 or filtered_group.text:
+            if len(filtered_group) > 0:
                 clean_root.append(filtered_group)
                 stats['kept'] += 1
             continue
 
-        # Filter direct paths/rects
-        if should_keep_element(elem):
-            clean_root.append(elem)
-            stats['kept'] += 1
+        # Keep other root elements
+        clean_root.append(elem)
+        stats['kept'] += 1
 
-    print(f"  → Kept {stats['kept']} elements, skipped {stats['skipped_large']} large rectangles, {stats['skipped_meta']} metadata")
+    print(f"  → Kept {stats['kept']} elements, filtered {stats['skipped']} out-of-bounds paths")
 
     tree = ET.ElementTree(clean_root)
     tree.write(output_path, encoding='utf-8', xml_declaration=True)
