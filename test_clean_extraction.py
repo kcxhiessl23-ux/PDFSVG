@@ -71,6 +71,7 @@ def extract_clean_svg(pdf_path, bbox, output_path):
     """
     NEW METHOD: Filter out large rectangles (backgrounds/boxes)
     Keep text, diagrams, and actual placard content
+    RECURSIVELY processes groups to catch nested large rectangles
     """
     print("  → Clean extraction (removing backgrounds/boxes)")
 
@@ -106,6 +107,80 @@ def extract_clean_svg(pdf_path, bbox, output_path):
 
     print(f"  → ViewBox: {viewBox_x} {viewBox_y} {viewBox_w} {viewBox_h} (with {margin}pt margin)")
 
+    # Stats
+    stats = {'kept': 0, 'skipped_large': 0, 'skipped_meta': 0}
+
+    # Helper function to check if element should be filtered
+    def should_keep_element(elem):
+        """Returns True if element should be kept, False if filtered out"""
+        tag = elem.tag.lower()
+
+        # Always filter metadata
+        if tag.endswith(('metadata', 'title', 'desc')):
+            stats['skipped_meta'] += 1
+            return False
+
+        # Filter large paths
+        if tag.endswith('path'):
+            d = elem.get('d', '')
+            area = estimate_path_area(d)
+            if area > placard_area * 0.5:
+                stats['skipped_large'] += 1
+                print(f"    ✗ Filtered path with area {area:.0f} (threshold: {placard_area * 0.5:.0f})")
+                return False
+
+        # Filter large rects
+        if tag.endswith('rect'):
+            try:
+                w = float(elem.get('width', '0'))
+                h = float(elem.get('height', '0'))
+                area = w * h
+                if area > placard_area * 0.5:
+                    stats['skipped_large'] += 1
+                    print(f"    ✗ Filtered rect with area {area:.0f}")
+                    return False
+            except:
+                pass
+
+        return True
+
+    # Recursive function to process groups and filter large elements
+    def process_group(parent_elem):
+        """Recursively process group, filtering out large rectangles"""
+        new_group = ET.Element(parent_elem.tag, parent_elem.attrib)
+
+        if parent_elem.text:
+            new_group.text = parent_elem.text
+        if parent_elem.tail:
+            new_group.tail = parent_elem.tail
+
+        for child in parent_elem:
+            tag = child.tag.lower()
+
+            # Recursively process groups
+            if tag.endswith('g'):
+                filtered_group = process_group(child)
+                # Only add group if it has children
+                if len(filtered_group) > 0 or filtered_group.text:
+                    new_group.append(filtered_group)
+                    stats['kept'] += 1
+                continue
+
+            # Check if we should keep this element
+            if should_keep_element(child):
+                new_group.append(child)
+                stats['kept'] += 1
+
+        return new_group
+
+    # First pass: find used defs (fonts)
+    defs_to_keep = set()
+    for elem in root.iter():
+        if elem.tag.endswith('use'):
+            href = elem.get('{http://www.w3.org/1999/xlink}href', elem.get('href', ''))
+            if href.startswith('#'):
+                defs_to_keep.add(href[1:])
+
     # Create clean SVG
     NS = "http://www.w3.org/2000/svg"
     XLINK = "http://www.w3.org/1999/xlink"
@@ -117,24 +192,11 @@ def extract_clean_svg(pdf_path, bbox, output_path):
     clean_root.set('height', f"{svg_height}pt")
     clean_root.set('viewBox', f"{viewBox_x} {viewBox_y} {viewBox_w} {viewBox_h}")
 
-    # Track what to keep
-    defs_to_keep = set()
-    kept = 0
-    skipped = 0
-    skipped_large = 0
-
-    # First pass: find used defs (fonts)
-    for elem in root.iter():
-        if elem.tag.endswith('use'):
-            href = elem.get('{http://www.w3.org/1999/xlink}href', elem.get('href', ''))
-            if href.startswith('#'):
-                defs_to_keep.add(href[1:])
-
     # Second pass: copy elements, filtering out large shapes
     for elem in root:
         tag = elem.tag.lower()
 
-        # Keep defs (fonts/patterns) - BUT FILTER CLIPPATH CONTENTS
+        # Keep defs (fonts/patterns) - Filter clipPath contents
         if tag.endswith('defs'):
             new_defs = ET.Element(elem.tag, elem.attrib)
             for def_elem in elem:
@@ -142,23 +204,21 @@ def extract_clean_svg(pdf_path, bbox, output_path):
 
                 # Filter clipPath contents by area
                 if def_elem.tag.endswith('clipPath'):
-                    # Create new clipPath without large rectangles
                     new_clip = ET.Element(def_elem.tag, def_elem.attrib)
                     clip_has_content = False
 
                     for clip_child in def_elem:
-                        # Check if this path is too large
                         if clip_child.tag.endswith('path'):
                             d = clip_child.get('d', '')
                             area = estimate_path_area(d)
                             if area > placard_area * 0.5:
-                                skipped_large += 1
-                                continue  # Skip this large rectangle
+                                stats['skipped_large'] += 1
+                                print(f"    ✗ Filtered clipPath with area {area:.0f}")
+                                continue
 
                         new_clip.append(clip_child)
                         clip_has_content = True
 
-                    # Only keep clipPath if it has small content
                     if clip_has_content:
                         new_defs.append(new_clip)
                     continue
@@ -168,54 +228,28 @@ def extract_clean_svg(pdf_path, bbox, output_path):
                     new_defs.append(def_elem)
 
             clean_root.append(new_defs)
-            kept += 1
+            stats['kept'] += 1
             continue
 
         # Skip metadata
         if tag.endswith(('metadata', 'title', 'desc')):
-            skipped += 1
+            stats['skipped_meta'] += 1
             continue
 
-        # Filter paths by area
-        if tag.endswith('path'):
-            d = elem.get('d', '')
-            area = estimate_path_area(d)
+        # Process groups recursively
+        if tag.endswith('g'):
+            filtered_group = process_group(elem)
+            if len(filtered_group) > 0 or filtered_group.text:
+                clean_root.append(filtered_group)
+                stats['kept'] += 1
+            continue
 
-            # FILTER: Remove large rectangles
-            # Based on diagnostics: page elements are 100k-1M area
-            # Placard content (text/diagrams) is <10k area
-            # Use threshold: 50% of placard area
-            if area > placard_area * 0.5:
-                skipped_large += 1
-                continue
-
+        # Filter direct paths/rects
+        if should_keep_element(elem):
             clean_root.append(elem)
-            kept += 1
-            continue
+            stats['kept'] += 1
 
-        # Filter rects
-        if tag.endswith('rect'):
-            try:
-                w = float(elem.get('width', '0'))
-                h = float(elem.get('height', '0'))
-                area = w * h
-
-                # Skip large rects (backgrounds)
-                if area > placard_area * 0.5:
-                    skipped_large += 1
-                    continue
-            except:
-                pass
-
-            clean_root.append(elem)
-            kept += 1
-            continue
-
-        # Keep everything else (groups, use, etc)
-        clean_root.append(elem)
-        kept += 1
-
-    print(f"  → Kept {kept} elements, skipped {skipped_large} large rectangles, {skipped} metadata")
+    print(f"  → Kept {stats['kept']} elements, skipped {stats['skipped_large']} large rectangles, {stats['skipped_meta']} metadata")
 
     tree = ET.ElementTree(clean_root)
     tree.write(output_path, encoding='utf-8', xml_declaration=True)
