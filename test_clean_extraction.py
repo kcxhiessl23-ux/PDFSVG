@@ -110,7 +110,7 @@ def extract_clean_svg(pdf_path, bbox, output_path):
     stats = {'kept': 0, 'skipped': 0, 'skipped_meta': 0}
 
     def is_path_in_bounds(d):
-        """Check if path coordinates are within viewBox"""
+        """Check if path extends too far beyond viewBox bounds"""
         if not d:
             return True  # Keep empty paths
 
@@ -130,15 +130,19 @@ def extract_clean_svg(pdf_path, bbox, output_path):
             min_x, max_x = min(xs), max(xs)
             min_y, max_y = min(ys), max(ys)
 
-            # Allow 50% margin - if path center is way outside bounds, skip it
-            # This catches page-size elements that extend far beyond the placard
-            path_center_x = (min_x + max_x) / 2
-            path_center_y = (min_y + max_y) / 2
+            # Check if path extends too far beyond viewBox boundaries
+            # This catches page-size backgrounds that extend way past the placard
+            # Allow 50% extension beyond viewBox in any direction
+            margin = 0.5
 
-            margin = 0.5  # 50% outside is OK
+            left_bound = vb_x - vb_w * margin
+            right_bound = vb_x + vb_w * (1 + margin)
+            top_bound = vb_y - vb_h * margin
+            bottom_bound = vb_y + vb_h * (1 + margin)
 
-            x_in_bounds = (vb_x - vb_w * margin) < path_center_x < (vb_x + vb_w * (1 + margin))
-            y_in_bounds = (vb_y - vb_h * margin) < path_center_y < (vb_y + vb_h * (1 + margin))
+            # Check if path extends beyond allowed bounds
+            x_in_bounds = (min_x >= left_bound) and (max_x <= right_bound)
+            y_in_bounds = (min_y >= top_bound) and (max_y <= bottom_bound)
 
             return x_in_bounds and y_in_bounds
         except:
