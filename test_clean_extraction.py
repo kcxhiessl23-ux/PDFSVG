@@ -135,10 +135,10 @@ def extract_clean_svg(pdf_path, bbox, output_path):
             path_center_x = (min_x + max_x) / 2
             path_center_y = (min_y + max_y) / 2
 
-            margin_factor = 1.5  # 50% outside is OK
+            margin = 0.5  # 50% outside is OK
 
-            x_in_bounds = (vb_x - vb_w * margin_factor) < path_center_x < (vb_x + vb_w * (1 + margin_factor))
-            y_in_bounds = (vb_y - vb_h * margin_factor) < path_center_y < (vb_y + vb_h * (1 + margin_factor))
+            x_in_bounds = (vb_x - vb_w * margin) < path_center_x < (vb_x + vb_w * (1 + margin))
+            y_in_bounds = (vb_y - vb_h * margin) < path_center_y < (vb_y + vb_h * (1 + margin))
 
             return x_in_bounds and y_in_bounds
         except:
