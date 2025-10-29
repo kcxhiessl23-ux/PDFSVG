@@ -91,6 +91,21 @@ def extract_clean_svg(pdf_path, bbox, output_path):
 
     print(f"  → Placard size: {svg_width:.0f}x{svg_height:.0f}pt (area: {placard_area:.0f})")
 
+    # Get original viewBox to check for offsets
+    original_viewBox = root.get('viewBox', f"0 0 {svg_width} {svg_height}")
+    vb_parts = original_viewBox.split()
+    vb_x = float(vb_parts[0]) if len(vb_parts) > 0 else 0
+    vb_y = float(vb_parts[1]) if len(vb_parts) > 1 else 0
+
+    # Add small margin to prevent text cutoff (2pt on each side)
+    margin = 2
+    viewBox_x = vb_x - margin
+    viewBox_y = vb_y - margin
+    viewBox_w = svg_width + (margin * 2)
+    viewBox_h = svg_height + (margin * 2)
+
+    print(f"  → ViewBox: {viewBox_x} {viewBox_y} {viewBox_w} {viewBox_h} (with {margin}pt margin)")
+
     # Create clean SVG
     NS = "http://www.w3.org/2000/svg"
     XLINK = "http://www.w3.org/1999/xlink"
@@ -100,7 +115,7 @@ def extract_clean_svg(pdf_path, bbox, output_path):
     clean_root.set('xmlns:xlink', XLINK)
     clean_root.set('width', f"{svg_width}pt")
     clean_root.set('height', f"{svg_height}pt")
-    clean_root.set('viewBox', f"0 0 {svg_width} {svg_height}")
+    clean_root.set('viewBox', f"{viewBox_x} {viewBox_y} {viewBox_w} {viewBox_h}")
 
     # Track what to keep
     defs_to_keep = set()
@@ -119,14 +134,39 @@ def extract_clean_svg(pdf_path, bbox, output_path):
     for elem in root:
         tag = elem.tag.lower()
 
-        # Keep defs (fonts/patterns)
+        # Keep defs (fonts/patterns) - BUT FILTER CLIPPATH CONTENTS
         if tag.endswith('defs'):
             new_defs = ET.Element(elem.tag, elem.attrib)
             for def_elem in elem:
                 def_id = def_elem.get('id', '')
-                # Keep if used or if it's a clipPath
-                if def_id in defs_to_keep or def_elem.tag.endswith('clipPath'):
+
+                # Filter clipPath contents by area
+                if def_elem.tag.endswith('clipPath'):
+                    # Create new clipPath without large rectangles
+                    new_clip = ET.Element(def_elem.tag, def_elem.attrib)
+                    clip_has_content = False
+
+                    for clip_child in def_elem:
+                        # Check if this path is too large
+                        if clip_child.tag.endswith('path'):
+                            d = clip_child.get('d', '')
+                            area = estimate_path_area(d)
+                            if area > placard_area * 0.5:
+                                skipped_large += 1
+                                continue  # Skip this large rectangle
+
+                        new_clip.append(clip_child)
+                        clip_has_content = True
+
+                    # Only keep clipPath if it has small content
+                    if clip_has_content:
+                        new_defs.append(new_clip)
+                    continue
+
+                # Keep fonts if used
+                if def_id in defs_to_keep:
                     new_defs.append(def_elem)
+
             clean_root.append(new_defs)
             kept += 1
             continue
