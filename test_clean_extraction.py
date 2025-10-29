@@ -202,25 +202,17 @@ def extract_clean_svg(pdf_path, bbox, output_path):
             for def_elem in elem:
                 def_id = def_elem.get('id', '')
 
-                # Filter clipPath contents by area
+                # Filter clipPath contents by area (RECURSIVELY)
                 if def_elem.tag.endswith('clipPath'):
-                    new_clip = ET.Element(def_elem.tag, def_elem.attrib)
-                    clip_has_content = False
+                    # Use the recursive process_group function to filter clipPath contents
+                    filtered_clip = process_group(def_elem)
 
-                    for clip_child in def_elem:
-                        if clip_child.tag.endswith('path'):
-                            d = clip_child.get('d', '')
-                            area = estimate_path_area(d)
-                            if area > placard_area * 0.5:
-                                stats['skipped_large'] += 1
-                                print(f"    ✗ Filtered clipPath with area {area:.0f}")
-                                continue
-
-                        new_clip.append(clip_child)
-                        clip_has_content = True
-
-                    if clip_has_content:
-                        new_defs.append(new_clip)
+                    # Only keep clipPath if it still has content after filtering
+                    if len(filtered_clip) > 0:
+                        # Change tag back to clipPath (process_group preserves tag)
+                        new_defs.append(filtered_clip)
+                    else:
+                        print(f"    ✗ Removed empty clipPath '{def_elem.get('id')}'")
                     continue
 
                 # Keep fonts if used
